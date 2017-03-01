@@ -154,12 +154,13 @@ class FRAPalyzer(object):
             image = np.subtract(image, background)
 
         if only_gt_zero:
-            image = np.ma.masked_less_equal(image, 0)
+            image[np.isnan(image)] = -1
+            image[image <= 0] = np.nan
 
         if keep_time:
-            return image.mean(axis=2).mean(axis=1).compressed()
+            return np.nanmean(np.nanmean(image, axis=2), axis=1).compressed()
         else:
-            return image.mean()
+            return np.nanmean(image)
 
     def _to_pixel(self, micron):
         return np.round(np.divide(micron, self._micron_per_pixel)).astype(np.int)
@@ -173,15 +174,15 @@ class FRAPalyzer(object):
         center = self._to_pixel(roi["positions"][0])
         radius = self._to_pixel(roi["sizes"][0, 0])
 
-        images = []
-        for t in range(self._file.sizes['t']):
-            image = self._file[t]
-            x, y = np.ogrid[-center[1]:self._file.metadata["height"] - center[1], -center[0]:
-            self._file.metadata["width"] - center[0]]
-            mask = x ** 2 + y ** 2 > radius ** 2
-            images.append(np.ma.masked_where(mask, image))
+        rect = self._get_rect_from_images(
+            (center[0] - radius, center[0] + radius, center[1] - radius, center[1] + radius))
 
-        return np.ma.array(images, dtype=self._file.pixel_type)
+        # Put NaNs on places that are not inside the circle
+        x, y = np.meshgrid(*map(np.arange, rect.shape[1:]), indexing='ij')
+        mask = ((x - radius) ** 2 + (y - radius) ** 2) > radius ** 2
+        rect[:, mask] = np.nan
+
+        return rect
 
     def _get_rectangular_slice_from_roi(self, roi):
         """
@@ -194,11 +195,18 @@ class FRAPalyzer(object):
         top = self._to_pixel(roi["positions"][0, 1] + roi["sizes"][0, 1] / 2)
         bottom = self._to_pixel(roi["positions"][0, 1] - roi["sizes"][0, 1] / 2)
 
-        images = []
-        for t in range(self._file.sizes['t']):
-            image = self._file[t]
-            x, y = np.ogrid[0:self._file.metadata["height"], 0:self._file.metadata["width"]]
-            mask = np.bitwise_or(x > right, np.bitwise_or(x < left, np.bitwise_or(y > top, y < bottom)))
-            images.append(np.ma.masked_where(mask, image))
+        return self._get_rect_from_images((left, right, bottom, top))
 
-        return np.ma.array(images, dtype=self._file.pixel_type)
+    def _get_rect_from_images(self, rect):
+        """
+        Rect: (left, right, bottom, top)
+        :param rect:
+        :return:
+        """
+        images = []
+
+        for t in range(self._file.sizes['t']):
+            image = self._file[t][rect[2]:rect[3], rect[0]:rect[1]]
+            images.append(image)
+
+        return np.array(images, dtype=self._file.pixel_type)
