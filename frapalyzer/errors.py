@@ -1,0 +1,2 @@
+class InvalidROIError(ValueError):
+    pass

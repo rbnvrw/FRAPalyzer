@@ -1,17 +1,22 @@
 import numpy as np
 from nd2reader import ND2Reader
 
+from frapalyzer.errors import InvalidROIError
+
 
 class FRAPalyzer(object):
     """
     Analyze Nikon ND2 stimulation FRAP experiments automatically
     """
+
     def __init__(self, nd2_filename):
         self._file = ND2Reader(nd2_filename)
         self._micron_per_pixel = self._file.metadata["pixel_microns"]
         self._background_roi = self._get_roi('background')
         self._reference_roi = self._get_roi('reference')
         self._stimulation_roi = self._get_roi('stimulation')
+        self._bleach_time_index = None
+        self._timesteps = None
 
     def __enter__(self):
         return self
@@ -28,6 +33,9 @@ class FRAPalyzer(object):
         Get the background ROI
         :return:
         """
+        if 'rois' not in self._file.metadata:
+            return None
+
         for roi in self._file.metadata['rois']:
             if roi['type'] == roi_type:
                 return roi
@@ -56,6 +64,20 @@ class FRAPalyzer(object):
             self._stimulation_roi = self._get_roi('stimulation')
         return self._stimulation_roi
 
+    @property
+    def bleach_time_index(self):
+        if self._bleach_time_index is not None:
+            return self._bleach_time_index
+        self._bleach_time_index = self._get_bleach_time_index()
+        return self._bleach_time_index
+
+    @property
+    def timesteps(self):
+        if self._timesteps is not None:
+            return self._timesteps
+        self._timesteps = self._get_timesteps()
+        return self._timesteps
+
     def get_normalized_stimulation(self):
         """
         Get the normalized and reference corrected stimulation signal
@@ -65,7 +87,7 @@ class FRAPalyzer(object):
         stimulated = self.get_mean_intensity(self.stimulation_roi, keep_time=True)
 
         # before this index: pre-bleach scan, after: post-bleach
-        bleach_time_index = self._get_bleach_time_index()
+        bleach_time_index = self.bleach_time_index
 
         ref_pre_bleach = reference[:bleach_time_index]
         stim_pre_bleach = stimulated[:bleach_time_index]
@@ -93,18 +115,38 @@ class FRAPalyzer(object):
 
         return int(np.round(current_index))
 
+    def _get_timesteps(self):
+        """
+        Get the time index after which bleaching was performed
+        :return:
+        """
+        timesteps = np.array([])
+        current_time = 0.0
+        for loop in self._file.metadata['experiment']['loops']:
+            if loop['stimulation']:
+                continue
+
+            timesteps = np.concatenate(
+                (timesteps, np.arange(current_time, current_time + loop['duration'], loop['sampling_interval'])))
+            current_time += loop['duration']
+
+        # if experiment did not finish, number of timesteps is wrong. Take correct amount of leading timesteps.
+        return timesteps[:self._file.metadata['num_frames']]
+
     def get_mean_intensity(self, roi, keep_time=False, subtract_background=True, only_gt_zero=True):
         """
         Calculate the mean background intensity
         :return:
         """
+        if roi is None or 'shape' not in roi:
+            raise InvalidROIError('Invalid ROI specified')
 
         if roi['shape'] == 'circle':
             image = self._get_circular_slice_from_roi(roi)
         elif roi['shape'] == 'rectangle':
             image = self._get_rectangular_slice_from_roi(roi)
         else:
-            raise ValueError('Only circular and rectangular ROIs are supported')
+            raise InvalidROIError('Only circular and rectangular ROIs are supported')
 
         if subtract_background:
             background = self.get_mean_intensity(self.background_roi, keep_time=False, subtract_background=False,
@@ -135,7 +177,7 @@ class FRAPalyzer(object):
         for t in range(self._file.sizes['t']):
             image = self._file[t]
             x, y = np.ogrid[-center[1]:self._file.metadata["height"] - center[1], -center[0]:
-                            self._file.metadata["width"] - center[0]]
+            self._file.metadata["width"] - center[0]]
             mask = x ** 2 + y ** 2 > radius ** 2
             images.append(np.ma.masked_where(mask, image))
 
