@@ -3,9 +3,9 @@ git:
   depth: 3
 notifications:
   email: false
-#addons:
-#  code_climate:
-#      repo_token: 8582900c285e4da0f253555b1bac1ba501bd6ff07850b0f227166b3cdac59ecc
+addons:
+  code_climate:
+      repo_token: 1dc8f0b2116f26194155ddf4ec61a61e9675ba5742d1e62077d44ce215195567
 
 python:
   - "2.7"
@@ -18,6 +18,7 @@ python:
   - "nightly" # currently points to 3.7-dev
 install:
   - pip install -r requirements.txt
+  - pip install git+https://github.com/rbnvrw/nd2reader
   - pip install codeclimate-test-reporter coverage
 
-#script: python ./test.py && CODECLIMATE_REPO_TOKEN=8582900c285e4da0f253555b1bac1ba501bd6ff07850b0f227166b3cdac59ecc codeclimate-test-reporter
+script: python ./test.py && CODECLIMATE_REPO_TOKEN=1dc8f0b2116f26194155ddf4ec61a61e9675ba5742d1e62077d44ce215195567 codeclimate-test-reporter
