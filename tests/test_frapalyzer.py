@@ -1,12 +1,14 @@
 from frapalyzer import FRAPalyzer
+from os import path
 import unittest
 
 
 class TestFrapalyzer(unittest.TestCase):
     def setUp(self):
+        dir_path = path.dirname(path.realpath(__file__))
         self.files = [
-            './test_data/data001.nd2',
-            './test_data/data002.nd2'
+            path.join(dir_path, 'test_data/data001.nd2'),
+            path.join(dir_path, 'test_data/data002.nd2')
         ]
 
     def test_get_background_roi_001(self):
