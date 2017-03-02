@@ -13,11 +13,11 @@ class FRAPalyzer(object):
     def __init__(self, nd2_filename):
         self._file = ND2Reader(nd2_filename)
         self._micron_per_pixel = self._file.metadata["pixel_microns"]
-        self._background_roi = self._get_roi('background')
-        self._reference_roi = self._get_roi('reference')
-        self._stimulation_roi = self._get_roi('stimulation')
-        self._bleach_time_index = None
-        self._timesteps = None
+        self.background_roi = self._get_roi('background')
+        self.reference_roi = self._get_roi('reference')
+        self.stimulation_roi = self._get_roi('stimulation')
+        self.bleach_time_index = self._get_bleach_time_index()
+        self.timesteps = self._get_timesteps()
 
     def __enter__(self):
         return self
@@ -46,38 +46,6 @@ class FRAPalyzer(object):
     @property
     def metadata(self):
         return self._file.metadata
-
-    @property
-    def background_roi(self):
-        if not hasattr(self, '_background_roi'):
-            self._background_roi = self._get_roi('background')
-        return self._background_roi
-
-    @property
-    def reference_roi(self):
-        if not hasattr(self, '_reference_roi'):
-            self._reference_roi = self._get_roi('reference')
-        return self._reference_roi
-
-    @property
-    def stimulation_roi(self):
-        if not hasattr(self, '_stimulation_roi'):
-            self._stimulation_roi = self._get_roi('stimulation')
-        return self._stimulation_roi
-
-    @property
-    def bleach_time_index(self):
-        if self._bleach_time_index is not None:
-            return self._bleach_time_index
-        self._bleach_time_index = self._get_bleach_time_index()
-        return self._bleach_time_index
-
-    @property
-    def timesteps(self):
-        if self._timesteps is not None:
-            return self._timesteps
-        self._timesteps = self._get_timesteps()
-        return self._timesteps
 
     def get_normalized_stimulation(self):
         """
@@ -167,13 +135,22 @@ class FRAPalyzer(object):
         # if experiment did not finish, number of timesteps is wrong. Take correct amount of leading timesteps.
         return timesteps[:self._file.metadata['num_frames']]
 
+    @staticmethod
+    def _check_roi(roi):
+        """
+        Checks if this is a valid ROI
+        :param roi:
+        :return:
+        """
+        if roi is None or 'shape' not in roi:
+            raise InvalidROIError('Invalid ROI specified')
+
     def get_mean_intensity(self, roi, keep_time=False, subtract_background=True, only_gt_zero=True):
         """
         Calculate the mean background intensity
         :return:
         """
-        if roi is None or 'shape' not in roi:
-            raise InvalidROIError('Invalid ROI specified')
+        self._check_roi(roi)
 
         image = self._get_slice_from_roi(roi)
 
@@ -216,9 +193,8 @@ class FRAPalyzer(object):
         """
         center = self._to_pixel(roi["positions"][0])
         radius = self._to_pixel(roi["sizes"][0, 0])
-
-        rect = self._get_rect_from_images(
-            (center[0] - radius, center[0] + radius, center[1] - radius, center[1] + radius))
+        coordinates = np.round(np.add(np.repeat(center[0:2], 2), np.multiply(radius, np.tile([-1, 1], (2,)))))
+        rect = self._get_rect_from_images(coordinates.astype(np.int))
 
         # Put NaNs on places that are not inside the circle
         x, y = np.meshgrid(*map(np.arange, rect.shape[1:]), indexing='ij')
@@ -229,16 +205,13 @@ class FRAPalyzer(object):
 
     def _get_rectangular_slice_from_roi(self, roi):
         """
-        Coordinates are the center coordinates of the ROI
+        Return a rectangular slice of the ROI
         :param roi:
         :return:
         """
-        left = self._to_pixel(roi["positions"][0, 0] - roi["sizes"][0, 0] / 2)
-        right = self._to_pixel(roi["positions"][0, 0] + roi["sizes"][0, 0] / 2)
-        top = self._to_pixel(roi["positions"][0, 1] + roi["sizes"][0, 1] / 2)
-        bottom = self._to_pixel(roi["positions"][0, 1] - roi["sizes"][0, 1] / 2)
-
-        return self._get_rect_from_images((left, right, bottom, top))
+        coordinates = np.round(np.add(np.repeat(roi['positions'][0, 0:2], 2),
+                                      np.multiply(np.repeat(roi["sizes"][0, 0:2], 2), np.tile([-0.5, 0.5], (2,)))))
+        return self._get_rect_from_images(coordinates.astype(np.int))
 
     def _get_rect_from_images(self, rect):
         """
@@ -249,7 +222,7 @@ class FRAPalyzer(object):
         images = []
 
         for t in range(self._file.sizes['t']):
-            image = self._file[t][rect[2]:rect[3], rect[0]:rect[1]]
+            image = self._file[int(t)][rect[2]:rect[3], rect[0]:rect[1]]
             images.append(image)
 
         return np.array(images, dtype=self._file.pixel_type)

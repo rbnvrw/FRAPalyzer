@@ -26,7 +26,7 @@ class TestFrapalyzer(unittest.TestCase):
     def test_get_mean_stim_001(self):
         with FRAPalyzer(self.files[0]) as analyzer:
             mean = analyzer.get_mean_intensity(analyzer.stimulation_roi, False, True, True)
-            self.assertAlmostEqual(mean, 112, places=0)
+            self.assertAlmostEqual(round(mean), 113, places=0)
 
     def test_fit_exponent(self):
         with FRAPalyzer(self.files[0]) as analyzer:
