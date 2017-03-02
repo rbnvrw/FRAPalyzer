@@ -2,6 +2,7 @@ import numpy as np
 from nd2reader import ND2Reader
 
 from frapalyzer.errors import InvalidROIError
+from scipy.optimize import least_squares
 
 
 class FRAPalyzer(object):
@@ -101,6 +102,39 @@ class FRAPalyzer(object):
 
         return corrected
 
+    def fit_exponential_recovery(self):
+        """
+        Fit an exponential recovery function
+        :return:
+        """
+        data = self.get_normalized_stimulation()
+        bleach_time = self.bleach_time_index
+        timesteps = self.timesteps
+
+        # Everything after bleach
+        recovery_data = data[bleach_time:]
+
+        # Guess for recovery and half time
+        recovery = np.max(recovery_data)
+        half_time_index = np.argmin(np.abs(recovery_data - recovery / 2.0))
+        try:
+            half_time = timesteps[half_time_index]
+        except IndexError:
+            half_time = timesteps[bleach_time]
+
+        # Make least squares fit
+        def frap_fit_function(params, t, y):
+            ln_half = np.log(0.5)
+            return params[0] * (1 - np.exp(ln_half / params[1] * t)) - y
+
+        res_lsq = least_squares(frap_fit_function, (recovery, half_time), args=(timesteps[bleach_time:], recovery_data))
+
+        if res_lsq.success:
+            recovery = res_lsq.x[0]
+            half_time = res_lsq.x[1]
+
+        return recovery, half_time
+
     def _get_bleach_time_index(self):
         """
         Get the time index after which bleaching was performed
@@ -141,12 +175,7 @@ class FRAPalyzer(object):
         if roi is None or 'shape' not in roi:
             raise InvalidROIError('Invalid ROI specified')
 
-        if roi['shape'] == 'circle':
-            image = self._get_circular_slice_from_roi(roi)
-        elif roi['shape'] == 'rectangle':
-            image = self._get_rectangular_slice_from_roi(roi)
-        else:
-            raise InvalidROIError('Only circular and rectangular ROIs are supported')
+        image = self._get_slice_from_roi(roi)
 
         if subtract_background:
             background = self.get_mean_intensity(self.background_roi, keep_time=False, subtract_background=False,
@@ -158,12 +187,26 @@ class FRAPalyzer(object):
             image[image <= 0] = np.nan
 
         if keep_time:
-            return np.nanmean(np.nanmean(image, axis=2), axis=1).compressed()
+            return np.nanmean(np.nanmean(image, axis=2), axis=1)
         else:
             return np.nanmean(image)
 
     def _to_pixel(self, micron):
         return np.round(np.divide(micron, self._micron_per_pixel)).astype(np.int)
+
+    def _get_slice_from_roi(self, roi):
+        """
+        Get the part of the image that is this ROI
+        :param roi:
+        :return:
+        """
+        if roi['shape'] == 'circle':
+            image = self._get_circular_slice_from_roi(roi)
+        elif roi['shape'] == 'rectangle':
+            image = self._get_rectangular_slice_from_roi(roi)
+        else:
+            raise InvalidROIError('Only circular and rectangular ROIs are supported')
+        return image
 
     def _get_circular_slice_from_roi(self, roi):
         """

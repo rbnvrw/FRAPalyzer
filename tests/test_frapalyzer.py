@@ -27,3 +27,10 @@ class TestFrapalyzer(unittest.TestCase):
         with FRAPalyzer(self.files[0]) as analyzer:
             mean = analyzer.get_mean_intensity(analyzer.stimulation_roi, False, True, True)
             self.assertAlmostEqual(mean, 112, places=0)
+
+    def test_fit_exponent(self):
+        with FRAPalyzer(self.files[0]) as analyzer:
+            recovery, half_time = analyzer.fit_exponential_recovery()
+            last_step = analyzer.timesteps[-1]
+            self.assertTrue((recovery > 0) and (recovery < 1))
+            self.assertTrue(half_time < last_step)
